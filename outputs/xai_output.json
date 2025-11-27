@@ -1,0 +1,74 @@
+[
+    {
+        "image_index": 1,
+        "predicted_class": 0,
+        "class_name": "ALL",
+        "true_class": 0,
+        "true_class_name": "ALL",
+        "confidence": 98.5350489616394,
+        "xai_insights": "Grad-CAM highlights the tumor in the brain center. Saliency Map shows tumor edges are critical. LIME outlines the tumor area as the most important region."
+    },
+    {
+        "image_index": 2,
+        "predicted_class": 1,
+        "class_name": "Brain Cancer",
+        "true_class": 1,
+        "true_class_name": "Brain Cancer",
+        "confidence": 99.60405826568604,
+        "xai_insights": "Grad-CAM highlights the tumor in the brain center. Saliency Map shows tumor edges are critical. LIME outlines the tumor area as the most important region."
+    },
+    {
+        "image_index": 3,
+        "predicted_class": 7,
+        "class_name": "Oral Cancer",
+        "true_class": 2,
+        "true_class_name": "Breast Cancer",
+        "confidence": 99.0256667137146,
+        "xai_insights": "Grad-CAM highlights the tumor in the brain center. Saliency Map shows tumor edges are critical. LIME outlines the tumor area as the most important region."
+    },
+    {
+        "image_index": 4,
+        "predicted_class": 3,
+        "class_name": "Cervical Cancer",
+        "true_class": 3,
+        "true_class_name": "Cervical Cancer",
+        "confidence": 99.95037317276001,
+        "xai_insights": "Grad-CAM highlights the tumor in the brain center. Saliency Map shows tumor edges are critical. LIME outlines the tumor area as the most important region."
+    },
+    {
+        "image_index": 5,
+        "predicted_class": 4,
+        "class_name": "Kidney Cancer",
+        "true_class": 4,
+        "true_class_name": "Kidney Cancer",
+        "confidence": 99.82807636260986,
+        "xai_insights": "Grad-CAM highlights the tumor in the brain center. Saliency Map shows tumor edges are critical. LIME outlines the tumor area as the most important region."
+    },
+    {
+        "image_index": 6,
+        "predicted_class": 5,
+        "class_name": "Lung and Colon Cancer",
+        "true_class": 5,
+        "true_class_name": "Lung and Colon Cancer",
+        "confidence": 99.28314685821533,
+        "xai_insights": "Grad-CAM highlights the tumor in the brain center. Saliency Map shows tumor edges are critical. LIME outlines the tumor area as the most important region."
+    },
+    {
+        "image_index": 7,
+        "predicted_class": 6,
+        "class_name": "Lymphoma",
+        "true_class": 6,
+        "true_class_name": "Lymphoma",
+        "confidence": 99.85620379447937,
+        "xai_insights": "Grad-CAM highlights the tumor in the brain center. Saliency Map shows tumor edges are critical. LIME outlines the tumor area as the most important region."
+    },
+    {
+        "image_index": 8,
+        "predicted_class": 7,
+        "class_name": "Oral Cancer",
+        "true_class": 7,
+        "true_class_name": "Oral Cancer",
+        "confidence": 99.8795747756958,
+        "xai_insights": "Grad-CAM highlights the tumor in the brain center. Saliency Map shows tumor edges are critical. LIME outlines the tumor area as the most important region."
+    }
+]

@@ -1,0 +1,9 @@
+{
+    "image_path": "/Users/shashank/real-time-cancer-detection-xai/test images/test.jpg",
+    "predicted_class": 1,
+    "class_name": "Brain Cancer",
+    "confidence": 79.63188886642456,
+    "xai_insights": "Grad-CAM highlights the tumor in the brain center. Saliency Map shows tumor edges are critical. LIME outlines the tumor area as the most important region.",
+    "patient_explanation": "Sorry, we couldn\u2019t generate a patient explanation right now.",
+    "doctor_explanation": "Due to a technical issue, we couldn\u2019t generate a detailed explanation. The AI predicted Brain Cancer with 79.6% confidence, identifying a cancer tumor in the in the center of the brain. Please consult the XAI insights and performance metrics for further analysis. \ud83e\ude7a"
+}
