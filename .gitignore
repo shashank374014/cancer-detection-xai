@@ -2,3 +2,4 @@ data/
 .env
 models/
 src/__pycache__/
+venv/
