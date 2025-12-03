@@ -130,6 +130,13 @@ python scripts/train_model_with_xai.py
 ```
 - Samples each class (`SAMPLE_SIZE_PER_CLASS` default 50), augments, trains the VGG16-based model, visualizes XAI on a test sample, and saves to `models/cancer_classifier_xai.h5`. Use caution if you already have a tuned model.
 
+### Notebook-style VGG16 training (per organ)
+If you want to reproduce the original notebook workflow that trains a frozen VGG16 head for every organ folder, run:
+```bash
+python scripts/train_model_with_xai1.py
+```
+This walks through each directory under `data/Multi_Cancer/`, trains the notebook-style classifier, and drops the resulting `*- VGG16.h5` weights into `models/` just like the IPYNB export.
+
 ## How the Pipeline Works (Step-by-Step)
 1. **Image acquisition** – GUI loads from disk or webcam.
 2. **Preprocessing** – Resize to 224×224, convert BGR→RGB, scale to [0,1].

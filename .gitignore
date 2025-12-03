@@ -3,3 +3,5 @@ data/
 models/
 src/__pycache__/
 venv/
+models-VGG16/
+outputs/

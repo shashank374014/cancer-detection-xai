@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 import numpy as np
 import cv2
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
-                            QPushButton, QLabel, QTextEdit, QFileDialog, QScrollArea, QTabWidget, QProgressBar, QSizePolicy)
+                            QPushButton, QLabel, QTextEdit, QFileDialog, QScrollArea, QTabWidget, QProgressBar, QSizePolicy, QComboBox)
 from PyQt6.QtCore import Qt, QTimer, QSize
 from PyQt6.QtGui import QPixmap, QImage, QPalette
 import matplotlib.pyplot as plt
@@ -45,10 +45,12 @@ from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_sc
 # Set these parameters based on your setup
 # =============================================================================
 
-MODEL_PATH = "models/cancer_classifier_xai.h5"  # Path to your saved model
 IMG_SIZE = (224, 224)  # Match your model’s input size
 OUTPUT_FILE = "outputs/real_time_xai_output.json"  # Path for saving results
 PERFORMANCE_METRICS_FILE = "outputs/performance_metrics.json"  # Path for metrics
+ROUTER_MODEL_PATH = "models/organ_router.h5"
+ROUTER_LABELS_PATH = "models/organ_router_labels.json"
+METADATA_DIR = "models"
 
 # Load environment variables from a local .env file if present (no effect if missing)
 load_dotenv()
@@ -63,11 +65,26 @@ if not HUGGING_FACE_API_TOKEN:
         "No Hugging Face API token found. Set HF_TOKEN in the environment or update HUGGING_FACE_API_TOKEN."
     )
 
-# Class dictionary (hardcoded for simplicity, match test_with_h5.py)
-class_dict = {
-    'ALL': 0, 'Brain Cancer': 1, 'Breast Cancer': 2, 'Cervical Cancer': 3,
-    'Kidney Cancer': 4, 'Lung and Colon Cancer': 5, 'Lymphoma': 6, 'Oral Cancer': 7
-}
+def _format_label(name: str) -> str:
+    return name.replace("_", " ").replace("-", " ").title()
+
+
+def _normalize_organ_name(name: str) -> str:
+    if not name:
+        return ""
+    normalized = name.lower().replace("_", " ").replace("-", " ")
+    return " ".join(normalized.split())
+
+
+def _generate_xai_insights(class_name: str, organ_label: str) -> str:
+    lower = class_name.lower()
+    if any(keyword in lower for keyword in ["normal", "benign", "healthy"]):
+        return (f"Grad-CAM shows uniform activation across healthy {organ_label.lower()} tissue. "
+                "Saliency Map confirms no suspicious boundaries. "
+                "LIME highlights consistent textures with no focal mass.")
+    return (f"Grad-CAM highlights a suspicious region within the {organ_label.lower()} tissue. "
+            "Saliency Map emphasizes sharp lesion borders. "
+            "LIME outlines the zone most responsible for the tumor prediction.")
 
 
 def _is_convolutional_layer(layer):
@@ -99,25 +116,6 @@ def _find_penultimate_conv_layer(model):
     return candidate
 
 
-def _chat_completion(messages, max_tokens, temperature=0.7, top_p=0.9):
-    """Call Hugging Face router chat-completions API and return the assistant response."""
-    payload = {
-        "messages": messages,
-        "model": HF_CHAT_MODEL,
-        "max_tokens": max_tokens,
-        "temperature": temperature,
-        "top_p": top_p,
-    }
-    try:
-        response = requests.post(HF_CHAT_API_URL, headers=HF_HEADERS, json=payload, timeout=30)
-        response.raise_for_status()
-        body = response.json()
-        return body["choices"][0]["message"]["content"].strip()
-    except (requests.exceptions.RequestException, KeyError, IndexError, TypeError) as exc:
-        print(f"Hugging Face chat completion failed: {exc}")
-        return None
-
-
 # =============================================================================
 # Functions
 # Load and preprocess image, predict, generate XAI, and provide LLM explanation
@@ -134,49 +132,12 @@ def load_and_preprocess_image(image_path):
     img = img / 255.0
     return np.expand_dims(img, axis=0)
 
-def visualize_xai_and_collect(model, img_array, class_dict, predicted_class):
+def visualize_xai_and_collect(model, img_array, class_names, organ_label, predicted_class):
     """Generate XAI visualizations and collect data for LLM."""
     pred = model.predict(img_array)
     confidence = pred[0][predicted_class] * 100
-    class_name = list(class_dict.keys())[predicted_class]
-    
-    # Dynamic XAI insights based on class_name
-    if "brain" in class_name.lower():
-        xai_insights = ("Grad-CAM highlights the tumor in the brain center. "
-                       "Saliency Map shows tumor edges are critical. "
-                       "LIME outlines the tumor area as the most important region.")
-    elif "breast" in class_name.lower():
-        xai_insights = ("Grad-CAM highlights the tumor in the breast tissue. "
-                       "Saliency Map shows tumor edges are critical. "
-                       "LIME outlines the tumor area as the most important region.")
-    elif "lung" in class_name.lower():
-        xai_insights = ("Grad-CAM highlights the tumor in the lung tissue. "
-                       "Saliency Map shows tumor edges are critical. "
-                       "LIME outlines the tumor area as the most important region.")
-    elif "colon" in class_name.lower():
-        xai_insights = ("Grad-CAM highlights the tumor in the colon tissue. "
-                       "Saliency Map shows tumor edges are critical. "
-                       "LIME outlines the tumor area as the most important region.")
-    elif "cervical" in class_name.lower():
-        xai_insights = ("Grad-CAM highlights the tumor in the cervical tissue. "
-                       "Saliency Map shows tumor edges are critical. "
-                       "LIME outlines the tumor area as the most important region.")
-    elif "kidney" in class_name.lower():
-        xai_insights = ("Grad-CAM highlights the tumor in the kidney tissue. "
-                       "Saliency Map shows tumor edges are critical. "
-                       "LIME outlines the tumor area as the most important region.")
-    elif "oral" in class_name.lower():
-        xai_insights = ("Grad-CAM highlights the tumor in the oral cavity. "
-                       "Saliency Map shows tumor edges are critical. "
-                       "LIME outlines the tumor area as the most important region.")
-    elif "lymphoma" in class_name.lower():
-        xai_insights = ("Grad-CAM highlights the tumor in the lymphatic system. "
-                       "Saliency Map shows tumor edges are critical. "
-                       "LIME outlines the tumor area as the most important region.")
-    elif "all" in class_name.lower():
-        xai_insights = ("Grad-CAM highlights the condition in the affected area. "
-                       "Saliency Map shows critical patterns. "
-                       "LIME outlines the most important region.")
+    class_name = class_names[predicted_class]
+    xai_insights = _generate_xai_insights(class_name, organ_label)
     
     # Generate XAI visuals
     def gradcam_loss(output):
@@ -229,20 +190,18 @@ def visualize_xai_and_collect(model, img_array, class_dict, predicted_class):
     
     return class_name, confidence, xai_insights, original_img, cam, saliency, lime_img
 
-def get_llm_explanation(class_name, xai_insights, confidence):
-    # Safely parse class_name for tumor type and location
+def get_llm_explanation(class_name, organ_label, xai_insights, confidence):
     parts = class_name.split()
-    if len(parts) > 1:  # Multi-word name (e.g., "Kidney Cancer")
-        location = parts[0].lower()  # e.g., "kidney"
-        tumor_type = parts[1].lower()  # e.g., "cancer"
-    else:  # Single-word name (e.g., "ALL", "Lymphoma")
-        location = "the affected area"  # Generic for non-specific cancers
-        tumor_type = class_name.lower()  # e.g., "all", "lymphoma"
+    if len(parts) > 1:
+        location = parts[0].lower()
+        tumor_type = parts[1].lower()
+    else:
+        location = (organ_label or "the affected area").lower()
+        tumor_type = class_name.lower()
 
-    tumor_label = f"{tumor_type} tumor" if tumor_type not in ["all"] else f"{tumor_type} condition"  # Adjust for "ALL"
+    tumor_label = f"{tumor_type} tumor" if tumor_type not in ["all"] else f"{tumor_type} condition"
 
-    # Infer tumor location primarily from class_name, ignoring XAI unless brain-specific
-    tumor_location = "in the middle of the body"  # Default (removed for specificity, but kept for fallback)
+    tumor_location = "in the middle of the body"
     if "brain" in class_name.lower():
         tumor_location = "in the center of the brain" if "brain center" in xai_insights.lower() else "in the brain"
     elif "breast" in class_name.lower():
@@ -262,25 +221,32 @@ def get_llm_explanation(class_name, xai_insights, confidence):
     elif "all" in class_name.lower():
         tumor_location = "in the affected area"
 
-    # Medical context based on cancer type
-    medical_context = f"it’s a common {tumor_type} {('tumor' if tumor_type not in ['all'] else 'condition')}" if tumor_type not in ["all"] else f"it’s a type of blood cancer involving abnormal lymphocytes"
+    medical_context = (
+        f"it’s a common {tumor_type} {('tumor' if tumor_type not in ['all'] else 'condition')}"
+        if tumor_type not in ["all"]
+        else "it’s a type of blood cancer involving abnormal lymphocytes"
+    )
 
-    # Use dynamic opener based on confidence
     opener = "Dear Patient," if confidence >= 70 else "We understand your concerns,"
 
-    # Patient-friendly prompt with template, headers, checklist, and bullet points
-    patient_prompt = (f"Follow this template: [GREETING] [PREDICTION SUMMARY] [MEDICAL CONTEXT] [HOPEFUL NOTE] [VALIDATION SUMMARY], "
-                     f"with each section having 20-50 words and using 'Dear Patient,' as the opener. Include keywords 'confidence,' 'tumor,' 'survival.' "
-                     f"[GREETING] Start with a formal, reassuring tone. [PREDICTION SUMMARY] State the AI’s {confidence:.1f}% confidence in identifying a {tumor_label} in {tumor_location}. "
-                     f"[MEDICAL CONTEXT] Explain it’s a manageable condition, using bullet points for survival facts. [HOPEFUL NOTE] Offer hope with bullet points on health outcomes. "
-                     f"[VALIDATION SUMMARY] Recap confidence, location, and hope, ending with ✨. Use simple language, avoid jargon.")
+    patient_prompt = (
+        "Follow this template: [GREETING] [PREDICTION SUMMARY] [MEDICAL CONTEXT] [HOPEFUL NOTE] [VALIDATION SUMMARY], "
+        f"with each section having 20-50 words and using 'Dear Patient,' as the opener. Include keywords 'confidence,' 'tumor,' 'survival.' "
+        f"[GREETING] Start with a formal, reassuring tone. [PREDICTION SUMMARY] State the AI’s {confidence:.1f}% confidence in identifying a {tumor_label} in {tumor_location}. "
+        "[MEDICAL CONTEXT] Explain it’s a manageable condition, using bullet points for survival facts. "
+        "[HOPEFUL NOTE] Offer hope with bullet points on health outcomes. "
+        "[VALIDATION SUMMARY] Recap confidence, location, and hope, ending with ✨. Use simple language, avoid jargon."
+    )
 
-    # Doctor/Engineer-friendly prompt with template, headers, checklist, and numbered lists
-    doctor_prompt = (f"Follow this template: [INTRODUCTION] [CLINICAL CONTEXT] [XAI ANALYSIS] [CONCLUSION] [VALIDATION SUMMARY], "
-                     f"with each section having 20-50 words and using 'For oncologists and data engineers,' as the opener. Include keywords 'confidence,' 'neoplastic,' 'activation.' "
-                     f"[INTRODUCTION] Explain the {confidence:.1f}% prediction of {class_name} in {tumor_location}. [CLINICAL CONTEXT] Provide advanced context (e.g., renal cell carcinoma). "
-                     f"[XAI ANALYSIS] Detail Grad-CAM, Saliency Map, and LIME findings in a numbered list. [CONCLUSION] Note clinical utility. "
-                     f"[VALIDATION SUMMARY] Recap confidence, location, and XAI, ending with 🩺. Use technical terms.")
+    doctor_prompt = (
+        "Follow this template: [INTRODUCTION] [CLINICAL CONTEXT] [XAI ANALYSIS] [CONCLUSION] [VALIDATION SUMMARY], "
+        "with each section having 20-50 words and using 'For oncologists and data engineers,' as the opener. Include keywords 'confidence,' 'neoplastic,' 'activation.' "
+        f"[INTRODUCTION] Explain the {confidence:.1f}% prediction of {class_name} in {tumor_location}. "
+        "[CLINICAL CONTEXT] Provide advanced context (e.g., renal cell carcinoma). "
+        "[XAI ANALYSIS] Detail Grad-CAM, Saliency Map, and LIME findings in a numbered list. "
+        "[CONCLUSION] Note clinical utility. "
+        "[VALIDATION SUMMARY] Recap confidence, location, and XAI, ending with 🩺. Use technical terms."
+    )
 
     patient_messages = [
         {
@@ -301,9 +267,7 @@ def get_llm_explanation(class_name, xai_insights, confidence):
     doctor_messages = [
         {
             "role": "system",
-            "content": (
-                "You brief oncologists and data engineers on cancer AI predictions using concise technical language."
-            ),
+            "content": "You brief oncologists and data engineers on cancer AI predictions using concise technical language.",
         },
         {"role": "user", "content": doctor_prompt},
     ]
@@ -367,6 +331,12 @@ class CancerDetectionWindow(QMainWindow):
         self.camera_button.setToolTip("Capture an image from your webcam for real-time analysis.")
         self.camera_button.clicked.connect(self.capture_from_camera)
         patient_layout.addWidget(self.camera_button)
+
+        # Organ selection dropdown
+        self.organ_selector = QComboBox()
+        self.organ_selector.setToolTip("Select an organ manually or leave on auto-detect.")
+        self.organ_selector.addItem("Auto-Detect Organ (Recommended)", userData=None)
+        patient_layout.addWidget(self.organ_selector)
         
         # Progress bar for processing
         self.progress_bar = QProgressBar()
@@ -407,12 +377,6 @@ class CancerDetectionWindow(QMainWindow):
         self.help_button.clicked.connect(self.show_help)
         patient_layout.addWidget(self.help_button)
         
-        # Privacy notice for patients
-        self.privacy_label = QLabel("Privacy Notice: Your data is anonymized and not stored. We comply with HIPAA/GDPR for medical data protection. Uploads are processed securely and deleted after use. ✨")
-        self.privacy_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.privacy_label.setToolTip("Learn about how your data is protected and handled.")
-        patient_layout.addWidget(self.privacy_label)
-        
         # Doctors/Engineers Tab (Metrics and Technical Details)
         doctors_tab = QWidget()
         doctors_layout = QVBoxLayout(doctors_tab)
@@ -432,9 +396,15 @@ class CancerDetectionWindow(QMainWindow):
         self.tab_widget.addTab(patient_tab, "Patients")
         self.tab_widget.addTab(doctors_tab, "Doctors/Engineers")
         
-        # Load model
-        self.model = None
-        self.load_model()
+        # Load router and organ configs
+        self.router_model = None
+        self.router_labels = []
+        self.organ_models = {}
+        self.organ_configs = {}
+        self.organ_lookup = {}
+        self.load_router_model()
+        self.organ_configs = self.load_available_organ_configs()
+        self.refresh_organ_selector()
         
         # Timer for periodic checks (optional for real-time updates, not used here)
         self.timer = QTimer()
@@ -445,15 +415,125 @@ class CancerDetectionWindow(QMainWindow):
         self.is_dark_theme = False
         self.xai_data = None  # Store XAI data for potential export or reuse
 
-    def load_model(self):
-        """Load the saved model in a background-friendly way."""
+    def load_router_model(self):
+        """Load organ router and labels if available."""
         try:
-            self.model = load_model(MODEL_PATH)
-            print(f"Loaded model from {MODEL_PATH}")
-        except Exception as e:
-            print(f"Error loading model: {e}")
-            self.patient_results_text.append(f"Error: Could not load model - {e} ❗")
-            self.doctors_results_text.append(f"Error: Could not load model - {e} 🔍")
+            self.router_model = load_model(ROUTER_MODEL_PATH)
+            with open(ROUTER_LABELS_PATH, 'r') as f:
+                self.router_labels = json.load(f)
+            print(f"Loaded router model from {ROUTER_MODEL_PATH}")
+        except (OSError, IOError, json.JSONDecodeError) as exc:
+            print(f"Warning: Could not load router model or labels ({exc}). Auto-detect disabled.")
+            self.router_model = None
+            self.router_labels = []
+
+    def load_available_organ_configs(self):
+        """Load organ-specific classifiers from metadata files."""
+        configs = {}
+        if not os.path.isdir(METADATA_DIR):
+            print(f"Metadata directory {METADATA_DIR} not found.")
+            return configs
+        for entry in os.listdir(METADATA_DIR):
+            if not entry.endswith(".metadata.json"):
+                continue
+            metadata_path = os.path.join(METADATA_DIR, entry)
+            try:
+                with open(metadata_path, "r") as f:
+                    meta = json.load(f)
+            except (OSError, json.JSONDecodeError):
+                print(f"Warning: Could not parse metadata {metadata_path}")
+                continue
+            organ_folder = meta.get("organ_folder")
+            if not organ_folder or organ_folder in configs:
+                continue
+            model_path = meta.get("model_path") or os.path.splitext(metadata_path)[0] + ".h5"
+            class_names = meta.get("class_names")
+            if not class_names:
+                print(f"Warning: No class names listed in {metadata_path}")
+                continue
+            display_name = meta.get("organ_display") or _format_label(organ_folder)
+            configs[organ_folder] = {
+                "display_name": display_name,
+                "model_path": model_path,
+                "class_names": class_names,
+            }
+        if not configs:
+            print("No organ metadata files found in models/.")
+        self.rebuild_organ_lookup(configs)
+        return configs
+
+    def refresh_organ_selector(self):
+        """Update dropdown with available organs."""
+        current = self.organ_selector.currentData()
+        self.organ_selector.blockSignals(True)
+        self.organ_selector.clear()
+        self.organ_selector.addItem("Auto-Detect Organ (Recommended)", userData=None)
+        for organ_key in sorted(self.organ_configs.keys()):
+            self.organ_selector.addItem(self.organ_configs[organ_key]["display_name"], userData=organ_key)
+        if current and current in self.organ_configs:
+            idx = self.organ_selector.findData(current)
+            if idx >= 0:
+                self.organ_selector.setCurrentIndex(idx)
+        self.organ_selector.blockSignals(False)
+
+    def rebuild_organ_lookup(self, configs):
+        """Normalize organ names for router mapping."""
+        self.organ_lookup = { _normalize_organ_name(k): k for k in configs.keys() }
+
+    def load_organ_model(self, organ_key):
+        """Lazy load organ-specific classifier."""
+        if organ_key in self.organ_models:
+            return self.organ_models[organ_key]
+        config = self.organ_configs.get(organ_key)
+        if not config:
+            raise ValueError(f"No configuration for organ '{organ_key}'.")
+        model_path = config["model_path"]
+        if not os.path.exists(model_path):
+            raise FileNotFoundError(f"Model file not found: {model_path}")
+        model = load_model(model_path)
+        self.organ_models[organ_key] = model
+        print(f"Loaded organ model for {organ_key} from {model_path}")
+        return model
+
+    def determine_organ(self, img_array):
+        """Determine organ via manual selection or router."""
+        selected_key = self.organ_selector.currentData()
+        if selected_key:
+            config = self.organ_configs.get(selected_key)
+            if not config:
+                message = f"Selected organ '{selected_key}' not configured."
+                self.patient_results_text.append(message)
+                self.doctors_results_text.append(message)
+                return None, None, None, None
+            return selected_key, config["display_name"], 100.0, "manual"
+
+        if self.router_model is None or not self.router_labels:
+            message = "Router unavailable. Please select an organ manually."
+            self.patient_results_text.append(message)
+            self.doctors_results_text.append(message)
+            return None, None, None, None
+
+        preds = self.router_model.predict(img_array)
+        idx = int(np.argmax(preds[0]))
+        confidence = preds[0][idx] * 100
+        if idx >= len(self.router_labels):
+            message = "Router label mismatch. Please select an organ manually."
+            self.patient_results_text.append(message)
+            self.doctors_results_text.append(message)
+            return None, None, None, None
+        organ_name = self.router_labels[idx]
+        if organ_name not in self.organ_configs:
+            normalized = _normalize_organ_name(organ_name)
+            mapped = self.organ_lookup.get(normalized)
+            if mapped and mapped in self.organ_configs:
+                organ_name = mapped
+            else:
+                message = f"Router predicted {organ_name}, but no classifier is configured. Please choose manually."
+                self.patient_results_text.append(message)
+                self.doctors_results_text.append(message)
+                return None, None, None, None
+        display = self.organ_configs[organ_name]["display_name"]
+        return organ_name, display, confidence, "auto"
 
     def upload_image(self):
         """Open file dialog to upload an image."""
@@ -484,68 +564,82 @@ class CancerDetectionWindow(QMainWindow):
         os.remove("temp_camera_image.jpg") if os.path.exists("temp_camera_image.jpg") else None
 
     def process_image(self):
-        if not self.model or not self.image_path:
-            self.patient_results_text.append("Error: No model or image loaded ❗")
-            self.doctors_results_text.append("Error: No model or image loaded 🔍")
+        if not self.image_path:
+            self.patient_results_text.append("Error: No image selected ❗")
+            self.doctors_results_text.append("Error: No image selected 🔍")
             return
-    
+
         self.progress_bar.setVisible(True)
         self.progress_bar.setValue(0)
-    
+
         try:
-            # Load and preprocess image
-            if os.path.exists(self.image_path):
-                img_array = load_and_preprocess_image(self.image_path)
-            else:
-                img_array = load_and_preprocess_image(self.image_path)  # Handle camera capture
-            self.progress_bar.setValue(30)
-            self.patient_results_text.append("Image preprocessed successfully 💊")
-            self.doctors_results_text.append("Image preprocessed successfully 🩺")
-        
-            # Predict and generate XAI
-            predicted_class = np.argmax(self.model.predict(img_array)[0])
+            img_array = load_and_preprocess_image(self.image_path)
+            self.progress_bar.setValue(20)
+
+            organ_key, organ_label, organ_confidence, source = self.determine_organ(img_array)
+            if organ_key is None:
+                self.progress_bar.setVisible(False)
+                return
+
+            config = self.organ_configs[organ_key]
+            class_names = config["class_names"]
+            model = self.load_organ_model(organ_key)
+            self.progress_bar.setValue(40)
+
+            probs = model.predict(img_array)
+            predicted_class = int(np.argmax(probs[0]))
             self.progress_bar.setValue(60)
-            class_name, confidence, xai_insights, original_img, cam, saliency, lime_img = visualize_xai_and_collect(self.model, img_array, class_dict, predicted_class)
-        
+
+            class_name, confidence, xai_insights, original_img, cam, saliency, lime_img = visualize_xai_and_collect(
+                model, img_array, class_names, organ_label, predicted_class
+            )
+
             self.progress_bar.setValue(80)
             self.display_xai_visuals(original_img, cam, saliency, lime_img)
-        
-            # Generate LLM explanations for both audiences
-            patient_explanation, doctor_explanation = get_llm_explanation(class_name, xai_insights, confidence)
+
+            patient_explanation, doctor_explanation = get_llm_explanation(class_name, organ_label, xai_insights, confidence)
             self.progress_bar.setValue(100)
-        
-            # Update results for patients (formal, hopeful, simple, with separators and bullet points)
+
+            organ_text = f"{organ_label} ({organ_confidence:.1f}% via router)" if source == "auto" else f"{organ_label} (manual)"
+
             self.patient_results_text.clear()
-            self.patient_results_text.append(f"🌟 Prediction Results 🌟\n---\n")
+            self.patient_results_text.append("🌟 Prediction Results 🌟\n---\n")
+            self.patient_results_text.append(f"Detected Organ: {organ_text} 🧭\n---\n")
             self.patient_results_text.append(f"Predicted Class: {class_name} ({confidence:.1f}% confidence) 💊\n---\n")
             self.patient_results_text.append(f"XAI Insights: {xai_insights} 🩺\n---\n")
             self.patient_results_text.append(f"Layman’s Explanation:\n{patient_explanation}\n---\n")
-            self.patient_results_text.append(f"Positive Affirmation: With early detection and advanced medical care, many patients thrive. ✨")
-        
-            # Update results for doctors/engineers (technical, detailed, with separators and numbered lists)
+            self.patient_results_text.append("Positive Affirmation: With early detection and advanced care, many patients thrive. ✨")
+
             self.doctors_results_text.clear()
-            self.doctors_results_text.append(f"🩺 Technical Analysis 🩺\n---\n")
+            self.doctors_results_text.append("🩺 Technical Analysis 🩺\n---\n")
+            self.doctors_results_text.append(f"Detected Organ: {organ_text}\n---\n")
             self.doctors_results_text.append(f"Predicted Class: {class_name} ({confidence:.1f}% confidence) 💡\n---\n")
             self.doctors_results_text.append(f"XAI Insights: {xai_insights} 🔍\n---\n")
-            self.doctors_results_text.append(f"Prompt for LLM:\n{doctor_explanation}\n---\n")
-            self.doctors_results_text.append(f"Performance Metrics: {self.load_performance_metrics() if self.load_performance_metrics() else 'Metrics unavailable'} 🩺")
-        
-            # Save results to JSON
+            self.doctors_results_text.append(f"LLM Brief:\n{doctor_explanation}\n---\n")
+            metrics = self.load_performance_metrics()
+            metrics_text = (
+                f"Accuracy: {metrics['accuracy']:.3f}, Precision: {metrics['precision']:.3f}, "
+                f"Recall: {metrics['recall']:.3f}, F1: {metrics['f1_score']:.3f}"
+                if metrics else "Metrics unavailable"
+            )
+            self.doctors_results_text.append(f"Performance Metrics: {metrics_text} 🩺")
+
             xai_data = {
                 "image_path": self.image_path,
-                "predicted_class": int(predicted_class),
+                "organ": organ_label,
+                "predicted_class": predicted_class,
                 "class_name": class_name,
                 "confidence": confidence,
                 "xai_insights": xai_insights,
                 "patient_explanation": patient_explanation,
-                "doctor_explanation": doctor_explanation
+                "doctor_explanation": doctor_explanation,
             }
-            with open(OUTPUT_FILE, 'w') as f:
+            with open(OUTPUT_FILE, "w") as f:
                 json.dump(xai_data, f, indent=4)
             self.patient_results_text.append(f"Saved results to {OUTPUT_FILE} ✨")
             self.doctors_results_text.append(f"Saved results to {OUTPUT_FILE} 🩺")
-            self.xai_data = xai_data  # Store for potential export
-    
+            self.xai_data = xai_data
+
         except Exception as e:
             self.patient_results_text.append(f"Error processing image: {e} ❗")
             self.doctors_results_text.append(f"Error processing image: {e} 🔍")
@@ -684,6 +778,24 @@ class CancerDetectionWindow(QMainWindow):
                      "6. XAI (Explainable AI) uses Grad-CAM, Saliency Map, and LIME to explain predictions visually. 🔍\n"
                      "7. Contact support for issues or questions. ❗")
         self.patient_results_text.append(help_text)
+
+def _chat_completion(messages, max_tokens, temperature=0.7, top_p=0.9):
+    """Call Hugging Face router chat-completions API and return the assistant response."""
+    payload = {
+        "messages": messages,
+        "model": HF_CHAT_MODEL,
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+        "top_p": top_p,
+    }
+    try:
+        response = requests.post(HF_CHAT_API_URL, headers=HF_HEADERS, json=payload, timeout=30)
+        response.raise_for_status()
+        body = response.json()
+        return body["choices"][0]["message"]["content"].strip()
+    except (requests.exceptions.RequestException, KeyError, IndexError, TypeError) as exc:
+        print(f"Hugging Face chat completion failed: {exc}")
+        return None
 
 # Run the application
 if __name__ == "__main__":
